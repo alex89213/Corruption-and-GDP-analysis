@@ -1,0 +1,228 @@
+# Corruption and GDP per Capita
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE,
+                      warning = FALSE, error = TRUE, fig.height = 3)
+library(tidyverse)
+library(lubridate)
+library(kableExtra)
+library(broman)
+library(scales)
+library(modelr)
+source("../scripts/viridis.R")
+source("../scripts/ggprob.R")
+theme_set(theme_minimal())
+```
+
+### Introduction & Background
+
+> Corruption in itself has become a word imaged as a plague that festers in an organization, eating away at its resources and depleting equity within it, and the larger the organization, the larger the benefits that the corrupt could feast on. And what organization is more prominent than the governments of countries? Corruption in government officials comes in many forms, such as stealing money, resources, and jobs, all of which affect the economy and the well-being of the country’s citizens. Corruption has a symbiotic relationship with whatever host organization; the benefits and profits to be embezzled grow as the organization becomes more powerful and wealthy. Developed countries claim to have strict laws to prevent corruption in government employees, but how do they compare to underdeveloped and developing countries? How does the difference in the environment affect the corruption index of a country? How much effect does the country’s Gross Domestic Product, which measures the market value of a country’s economy, have on the corruption index within it?
+
+>Thesis Statement: An increase in GDP per capita will lead to an improvement in a country's corruption perception.
+
+### Data
+
+>In this project, three data sets were used. The first is sourced from Transparency International^[Corruption Perceptions Index, https://www.transparency.org/en/cpi, Transparency International], a non-profit, non-governmental organization centered on fighting and analyzing corruption. Since 1995, they have been annually publishing the Corruption Perceptions Index, which assigns each country an index from 1 to 100; the higher the score, the less corrupt the nation. The data gathered by Transparency International from 1998 to 2015 was organized into a data file by DataHub^[Corruption Perceptions Index, https://datahub.io/core/corruption-perceptions-index, DataHub], which was used in this project. In this data file, there is only one value: the corruption score for each country (a 1–10 score before 2012 and 1–100 after), which will be used to measure a country's corruption growth.
+
+>The second data set is from the World Bank^[GDP per capita (current US$), https://data.worldbank.org/indicator/NY.GDP.PCAP.CD, World Bank Open Data], a collection of five institutions whose goals are to promote sustainability, reduce poverty, and build shared prosperity in developing countries. They also provide annual economic data for most countries in the world. I will use their CSV file of annual GDP per capita in USD from 1960 to 2022 to measure GDP per capita growth.
+
+>The third data set is sourced from the United Nations’ 2014 report on country classifications^[Country classification, https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf, United Nations]. In this document, the United Nations placed countries into two distinct categories of development: developed and developing, with countries in the latter possibly being additionally identified as least developed. Using this report, three data sets were created containing the names of countries classified as developed, developing, and least developed, respectively.
+
+>The Corruption Perceptions Index and GDP per capita data sets are related to the question of interest because we want to compare how GDP growth in a country will impact that country's corruption. One thing to be considered is that, in the corruption data set, some countries—mostly African countries—do not have enough data to analyze their level of corruption, so we will have to eliminate those countries from our data set. The lack of information for those countries may affect the overall correlation, given that those countries with no corruption data are more likely to be missing because they already have a highly corrupt index.
+
+>For the rest of the report, we will first combine the Corruption Perceptions Index and GDP per capita data sets into one and categorize the countries into developed, developing, and least developed. We used both country classifications and country codes to arrange the countries and separate them into the three categories. After grouping the data, we will filter the data from 2014 and 2015 and run a regression line for each category, showing the correlation between the Corruption Perceptions Index and GDP per capita and comparing the regression lines between categories, determining the effects of GDP growth on corruption.
+
+>Because many countries have inconsistent names across these files (i.e., “America,” “The United States,” and “The United States of America” all refer to the same country), we will perform data wrangling by referencing their ISO 3166-1 alpha-3 code, provided by the International Organization for Standardization (ISO)^[ISO 3166 - Country Codes, https://www.iso.org/iso-3166-country-codes.html, International Organization for Standardization].
+
+
+### Graphs
+
+```{r, include = FALSE }
+
+# File Setup
+
+if(!file.exists("corruption.csv")){
+  download.file("https://pkgstore.datahub.io/core/corruption-perceptions-index/data_csv/data/e071f294ae29438b3837b14c340b65e6/data_csv.csv", destfile="corruption.csv")
+}
+corruption <- read_csv("corruption.csv")
+
+# made from corruption.csv and country codes from ISO
+country_codes_corruption <- read_csv("country_codes_corruption.csv")
+
+# made with data from UN, country codes from ISO were added with the help of chatGPT
+# https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf
+developed_with_code <- read_csv("developed_with_code.csv")
+developing_with_code <- read_csv("developing_with_code.csv")
+least_developed_with_code <- read_csv("least_developed_with_code.csv")
+
+# https://data.worldbank.org/indicator/NY.GDP.PCAP.CD 
+gdp_per_capita <- read_csv("gdp_per_capita_deleted_header.csv")
+```
+
+
+```{r, echo = FALSE}
+# Data Wrangling
+
+corruption <- corruption %>%
+  select("Jurisdiction", "2014", "2015") %>% 
+  rename(corruption_in_2014 = '2014', corruption_in_2015 = '2015', country_name = Jurisdiction) %>% 
+  mutate(corruption_in_2014 = case_when(corruption_in_2014 == '-' ~ NA, TRUE ~ corruption_in_2014)) %>% 
+  mutate(corruption_in_2015 = case_when(corruption_in_2015 == '-' ~ NA, TRUE ~ corruption_in_2015)) %>% 
+  drop_na
+
+country_codes_corruption <- country_codes_corruption %>%
+  rename(country_name = Country, country_code = Code)
+
+corruption <- left_join(corruption, country_codes_corruption, "country_name")
+corruption[33,4] <- "COG"
+corruption[35,4] <- "CIV"
+corruption[40,4] <- "COD"
+corruption[150,4] <- "MKD"
+
+gdp_per_capita <- gdp_per_capita %>%
+  select("Country Code", "2014", "2015") %>% 
+  drop_na %>% 
+  rename(gdp_in_2014 = "2014", gdp_in_2015 = "2015", country_code = "Country Code")
+
+corruption_and_gdp <- left_join(corruption, gdp_per_capita, "country_code")
+
+developed_with_code <- developed_with_code %>%
+  rename(country_name = "Country Name", country_code = "Country Code") %>% 
+  mutate(development_status = "developed")
+
+developing_with_code <- developing_with_code %>%
+  rename(country_name = "Country Name", country_code = "Country Code") %>% 
+  mutate(development_status = "developing")
+
+least_developed_with_code <- least_developed_with_code %>%
+  rename(country_name = "Country Name", country_code = "Country Code") %>% 
+  mutate(development_status = "least developed")
+
+developing_with_code <- anti_join(developing_with_code, least_developed_with_code, "country_code")
+
+development <- full_join(developed_with_code, developing_with_code)
+development <- full_join(development, least_developed_with_code)
+development <- development %>%
+  select(country_code, development_status)
+
+corruption_and_gdp <- left_join(corruption_and_gdp, development, "country_code") %>%
+  mutate(gdp_growth = ((gdp_in_2015 - gdp_in_2014) / gdp_in_2014) * 100) %>%
+  mutate(corruption_growth = (as.numeric(corruption_in_2015) - as.numeric(corruption_in_2014)) / as.numeric(corruption_in_2014) * 100) %>% 
+  drop_na
+
+ggplot(corruption_and_gdp, aes(x = gdp_growth, y = corruption_growth, color = development_status)) +
+  geom_point() +
+  geom_smooth(method="lm", se=FALSE) +
+  ggtitle("GDP per Capita and Corruption Growth per Country from 2014 - 2015") +
+  xlab("Growth in GDP per Capita (%)") +
+  ylab("Growth in CPI (%)")
+
+```
+
+```{r, echo = FALSE}
+
+developed_final <- corruption_and_gdp %>%
+  filter(development_status == "developed")
+lm_developed <- lm(corruption_growth ~ gdp_growth, developed_final)
+developed_final <- developed_final %>%
+  add_residuals(lm_developed) %>% 
+  add_predictions(lm_developed)
+developed_resid_plot <- ggplot(developed_final, aes(x = gdp_growth, y = resid)) +
+  geom_point() +
+  geom_smooth(se=FALSE) +
+  geom_hline(aes(yintercept=0), color="red", linetype = "dashed") +
+  xlab("Growth in GDP per Capita (%)") +
+  ylab("Residual of Growth in CPI (%)") +
+  ggtitle("GDP per Capita and Residual of Corruption Growth", subtitle = "2014 - 2015, Developed Countries")
+plot(lm_developed, which = 1:2, main = "Developed Countries")
+```
+
+```{r, echo = FALSE}
+developing_final <- corruption_and_gdp %>%
+  filter(development_status == "developing") 
+lm_developing <- lm(corruption_growth ~ gdp_growth, developing_final)
+developing_final <- developing_final %>%
+  add_residuals(lm_developing) %>% 
+  add_predictions(lm_developing)
+developing_resid_plot <- ggplot(developing_final, aes(x = gdp_growth, y = resid)) +
+  geom_point() + 
+  geom_smooth(se=FALSE) +
+  geom_hline(aes(yintercept=0), color="red", linetype = "dashed") +
+  xlab("Growth in GDP per Capita (%)") +
+  ylab("Residual of Growth in CPI (%)") +
+  ggtitle("GDP per Capita and Residual of Corruption Growth", subtitle = "2014 - 2015, Developing Countries")
+plot(lm_developing, which = 1:2, main = "Developing Countries")
+```
+
+```{r, echo = FALSE}
+least_developed_final <- corruption_and_gdp %>%
+  filter(development_status == "least developed")
+lm_least_developed <- lm(corruption_growth ~ gdp_growth, least_developed_final)
+least_developed_final <- least_developed_final %>%
+  add_residuals(lm_least_developed) %>% 
+  add_predictions(lm_least_developed)
+least_developed_resid_plot <- ggplot(least_developed_final, aes(x = gdp_growth, y = resid)) +
+  geom_point() + 
+  geom_smooth(se=FALSE) +
+  geom_hline(aes(yintercept = 0), color = "red", linetype = "dashed") +
+  xlab("Growth in GDP per Capita (%)") +
+  ylab("Residual of Growth in CPI (%)") +
+  ggtitle("GDP per Capita and Residual of Corruption Growth", subtitle = "2014 - 2015, Least Developed Countries")
+plot(lm_least_developed, which = 1:2, main = "Least Developed Countries")
+```
+
+### Analysis
+
+> Looking at the Residuals vs Fitted plots for each developmental group, after accounting for outliers, we can observe:
+>
+> 1. The residuals are distributed about 0 with fairly consistent variance
+> 2. There are no clear patterns
+>
+The graph for Developed Countries has two potential outliers at fitted values of 0.25 and 2.0, but both their residuals are close to 0 and do not change the trend of the fitted line. The graph for Least Developed Countries does display an outlier at the fitted value of 2 which does skew the fitted line away from 0.
+
+> Upon observing the Q-Q Residual plots for each developmental group, we can observe:
+>
+> 1. All points either follow or closely follow the identity line
+> 2. Higher concentration of points within the theoretical quantiles of -1 to 1
+> 3. Minor deviations from the identity line and lower concentration of points in the tails
+>
+Based on these plots, there isn't sufficient evidence to assume the sets of Developed, Developing, and Least Developed countries have residuals distributed in a non-normal fashion.
+
+> These observations and conclusions suggest that the data is apt for normal linear regression analysis.
+
+> With the model being the linear relationship between % growth in GDP per capita and CPI, our hypothesis would be
+
+$$
+H_0: p = 0\\
+H_a: p \neq 0
+$$
+
+> We shall set the significance level to 0.1, since we are only using data from 2014-15, making slight changes more significant
+
+```{r, echo = FALSE}
+summary(lm_developed)
+```
+
+> Since the P value for Developed economies is 0.671, which is greater than 0.1, we do not have enough evidence to reject the null hypothesis. That is, we cannot reject the hypothesis that growth in GDP per capita growth, does not affect growth in the Corruption Perception Index for Developed Economies.
+
+```{r, echo = FALSE}
+summary(lm_developing)
+```
+
+> Since the P value for Developing economies is 0.852, which is greater than 0.1, we do not have enough evidence to reject the null hypothesis. That is, we cannot reject the hypothesis that growth in GDP per capita growth does not affect growth in the Corruption Perception Index for developing Economies.
+
+```{r, echo = FALSE}
+summary(lm_least_developed)
+```
+
+> Since the P value for the Least Developed economies is 0.0648, which is less than 0.1, there is sufficient evidence to reject the null hypothesis; hence there is evidence that suggests that growth in GDP per capita growth, does affect growth in the Corruption Perception Index.
+
+> Since the Adjusted R-squared value is positive, a growth in GDP per capita Growth leads to a growth in the Corruption Perception Index. This implies that for Least Developed Economies, a growth in GDP per capita Growth leads to an improvement in the Corruption Perception of a country, meaning that when GDP per capita Increases, the economies' people view their governments as less corrupt, with the opposite being true when Growth in GDP per capita Growth falls.
+
+### Interpretation
+
+> The model suggests the existence of a linear relationship between change in growth in GDP per capita and Change in Growth in CPI, which exists only for the least developed economies, with no clear relationship between the two for Developing and Developed Economies. Therefore, the thesis statement is inconclusive for developing and developed economies, but is supported for least developed economies.
+
+> However, one may also investigate if the relationship between the GDP per capita and the Corruption Perception Index is not linear. It may also be worth to analyze and model the same information but with different indicators, such as Growth in Gross National Income per capita rather than Growth in GDP per capita, as GNI per capita may model the household income more accurately than GDP per capita. Using data from additional years, not just 2014-2015, may also provide a more accurate and resilient model as small changes would have less of an impact on the model and a stronger, more evident underlying relations between the two variables may be better highlighted.
+
+> Additional factors such as economic freedom, inflation, purchasing power parity, or even the sectoral economic composition of the respective economies may be accounted, to gain a better and more accurate insight into this relationship. 
