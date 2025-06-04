@@ -47,7 +47,7 @@ corruption <- read_csv("corruption.csv")
 # made from corruption.csv and country codes from ISO
 country_codes_corruption <- read_csv("country_codes_corruption.csv")
 
-# made with data from UN, country codes from ISO were added with the help of chatGPT
+# made with data from UN, with addition of country codes from ISO
 # https://www.un.org/en/development/desa/policy/wesp/wesp_current/2014wesp_country_classification.pdf
 developed_with_code <- read_csv("developed_with_code.csv")
 developing_with_code <- read_csv("developing_with_code.csv")
