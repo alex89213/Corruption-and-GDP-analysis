@@ -9,8 +9,6 @@ library(kableExtra)
 library(broman)
 library(scales)
 library(modelr)
-source("../scripts/viridis.R")
-source("../scripts/ggprob.R")
 theme_set(theme_minimal())
 ```
 
